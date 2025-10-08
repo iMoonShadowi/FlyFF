@@ -1,0 +1,24 @@
+{
+  "iron_sword": {
+    "Category": "Weapon",
+    "EquipSlot": "MainHand",
+    "DisplayName": "Iron Sword",
+    "Description": "A sturdy starter blade.",
+    "Stats": { "Attack": 12, "Defense": 0, "CritChance": 0.05 },
+    "BasePrice": 150,
+    "WorldMesh": "/Game/Art/Weapons/Meshes/SM_IronSword.SM_IronSword",
+    "Icon": "/Game/Art/Weapons/Icons/T_IronSword.T_IronSword",
+    "Tags": ["Rarity.Common", "Weapon.Sword"]
+  },
+  "wooden_shield": {
+    "Category": "Armor",
+    "EquipSlot": "OffHand",
+    "DisplayName": "Wooden Shield",
+    "Description": "Better than nothing.",
+    "Stats": { "Attack": 0, "Defense": 8 },
+    "BasePrice": 80,
+    "WorldMesh": "/Game/Art/Weapons/Meshes/SM_WoodenShield.SM_WoodenShield",
+    "Icon": "/Game/Art/Weapons/Icons/T_WoodenShield.T_WoodenShield",
+    "Tags": ["Rarity.Common", "Armor.Shield"]
+  }
+}

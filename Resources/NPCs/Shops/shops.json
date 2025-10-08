@@ -1,0 +1,4 @@
+[
+  { "ShopId":"CentralBlacksmith", "ItemId":"iron_sword",   "Price":150, "Quantity":-1, "LevelMin":1 },
+  { "ShopId":"CentralBlacksmith", "ItemId":"wooden_shield","Price":80,  "Quantity":-1, "LevelMin":1 }
+]

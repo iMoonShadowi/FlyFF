@@ -1,0 +1,11 @@
+{
+  "slime_green": {
+    "DisplayName": "Green Slime",
+    "Level": 2,
+    "BaseStats": { "Power": 4, "Attack": 3, "Defense": 2, "Vitality": 6 },
+    "Defense": 2,
+    "PhysResist": 0.1,
+    "MagicResist": 0.0,
+    "SkeletalMesh": "/Game/Art/Characters/Monsters/Slime/SK_Slime.SK_Slime"
+  }
+}
