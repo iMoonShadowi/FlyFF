@@ -151,16 +151,31 @@ void AFlyffCharacter::AlignCameraBehindCharacter(float dt)
 {
     if (bCameraFrozen) return;
 
-    const bool bGoingForward = (bAutoRun || ForwardAxis > 0.f);
-    if (!bGoingForward || !FMath::IsNearlyZero(TurnAxis)) return;
+    // Decide how aggressively to follow:
+    float FollowSpeed = 0.f;
+    if (!FMath::IsNearlyZero(TurnAxis))
+    {
+        // While pressing A/D, follow quickly so the camera stays behind
+        FollowSpeed = CameraFollowTurnSpeedDegPerSec;
+    }
+    else if (bAutoRun || ForwardAxis > 0.f)
+    {
+        // Moving forward: gentle auto-realign
+        FollowSpeed = CameraAlignSpeedDegPerSec;
+    }
+    else
+    {
+        // Not turning or moving forward → no auto follow
+        return;
+    }
 
     const float TargetYaw = GetActorRotation().Yaw;
     FRotator Cam = SpringArm->GetComponentRotation();
     const float Delta = FMath::FindDeltaAngleDegrees(Cam.Yaw, TargetYaw);
 
-    if (FMath::Abs(Delta) > 0.5f)
+    if (FMath::Abs(Delta) > 0.1f)
     {
-        const float Step = FMath::Clamp(Delta, -CameraAlignSpeedDegPerSec*dt, CameraAlignSpeedDegPerSec*dt);
+        const float Step = FMath::Clamp(Delta, -FollowSpeed * dt, FollowSpeed * dt);
         Cam.Yaw += Step;
         SpringArm->SetWorldRotation(Cam);
     }

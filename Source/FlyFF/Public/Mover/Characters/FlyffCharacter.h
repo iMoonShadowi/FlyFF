@@ -33,6 +33,9 @@ protected:
     UPROPERTY(EditAnywhere, Category="Camera")
     float CameraAlignSpeedDegPerSec = 360.f;   // how fast W aligns camera behind character
 
+    UPROPERTY(EditAnywhere, Category="Camera")
+    float CameraFollowTurnSpeedDegPerSec = 600.f; // camera follow speed while turning (A/D)
+
 private:
     // Movement/camera state
     float ForwardAxis = 0.f;   // +1 fwd (W), -1 back (S)
