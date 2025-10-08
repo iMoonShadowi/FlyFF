@@ -18,7 +18,9 @@ public class FlyFF : ModuleRules
             "EnhancedInput",
             "Json",
             "JsonUtilities",
-            "GameplayTags"
+            "GameplayTags",
+            "NavigationSystem",
+            "AIModule"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[] { });
