@@ -1,3 +1,5 @@
+// Source/FlyFF/Private/Mover/Characters/FlyffCharacter.cpp
+
 #include "Mover/Characters/FlyffCharacter.h"
 
 #include "Camera/CameraComponent.h"
@@ -9,10 +11,13 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/CollisionProfile.h"
-#include "Blueprint/AIBlueprintHelperLibrary.h"
-#include "NavigationSystem.h"
-#include "Kismet/GameplayStatics.h"
 
+#include "Blueprint/AIBlueprintHelperLibrary.h"   // SimpleMoveToLocation (click-to-move)
+#include "NavigationSystem.h"                      // nav types (optional)
+
+// ==============================
+// Constructor
+// ==============================
 AFlyffCharacter::AFlyffCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
@@ -32,17 +37,17 @@ AFlyffCharacter::AFlyffCharacter()
     Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
     Camera->bUsePawnControlRotation = false;
 
-    // --- Tank controls (we rotate via controller yaw, not orient-to-movement) ---
+    // --- Tank controls (actor turns via controller yaw) ---
     bUseControllerRotationYaw = true;
     UCharacterMovementComponent* Move = GetCharacterMovement();
-    Move->bOrientRotationToMovement = false;  // IMPORTANT for tank turning
+    Move->bOrientRotationToMovement = false;  // IMPORTANT for tank-turning
     Move->RotationRate   = FRotator(0.f, 720.f, 0.f);
     Move->MaxWalkSpeed   = 600.f;
     Move->JumpZVelocity  = 600.f;
     Move->AirControl     = 0.35f;
     Move->BrakingFrictionFactor = 1.5f;       // snappier stop/turn
 
-    // --- Ensure mesh doesn't block movement; capsule drives collision ---
+    // --- Collision: capsule drives; mesh is visual only ---
     if (UCapsuleComponent* Capsule = GetCapsuleComponent())
     {
         Capsule->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
@@ -63,6 +68,9 @@ AFlyffCharacter::AFlyffCharacter()
     SpringArm->CameraRotationLagSpeed = 15.f;
 }
 
+// ==============================
+// BeginPlay
+// ==============================
 void AFlyffCharacter::BeginPlay()
 {
     Super::BeginPlay();
@@ -78,8 +86,15 @@ void AFlyffCharacter::BeginPlay()
         Mode.SetHideCursorDuringCapture(false);
         PC->SetInputMode(Mode);
     }
+
+    // prime yaw tracking for camera follow
+    LastActorYaw = GetActorRotation().Yaw;
+    bFirstTickYaw = false;
 }
 
+// ==============================
+// Input bindings
+// ==============================
 void AFlyffCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
@@ -106,16 +121,21 @@ void AFlyffCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
     PlayerInputComponent->BindKey(EKeys::LeftMouseButton,  IE_Pressed,  this, &AFlyffCharacter::LMB_Pressed);
 }
 
+// ==============================
+// Tick
+// ==============================
 void AFlyffCharacter::Tick(float dt)
 {
     Super::Tick(dt);
     ApplyTurn(dt);
     ApplyMovement(dt);
     ApplyFreeLook(dt);
-    AlignCameraBehindCharacter(dt);
+    UpdateCameraFollow(dt);   // <— camera tracks actor yaw changes (A/D) and forward movement
 }
 
-// --- per-tick helpers ---
+// ==============================
+// Per-tick helpers
+// ==============================
 
 void AFlyffCharacter::ApplyTurn(float dt)
 {
@@ -126,7 +146,7 @@ void AFlyffCharacter::ApplyTurn(float dt)
 void AFlyffCharacter::ApplyMovement(float /*dt*/)
 {
     // autorun keeps you moving forward without W held
-    const float Forward = (bAutoRun ? 1.f : 0.f) + ForwardAxis; // S can still drive negative
+    const float Forward = (bAutoRun ? 1.f : 0.f) + ForwardAxis; // S can still push negative
     if (!FMath::IsNearlyZero(Forward))
         AddMovementInput(GetActorForwardVector(), FMath::Clamp(Forward, -1.f, 1.f));
 }
@@ -147,41 +167,56 @@ void AFlyffCharacter::ApplyFreeLook(float dt)
     }
 }
 
-void AFlyffCharacter::AlignCameraBehindCharacter(float dt)
+// NEW: follow camera whenever actor yaw changes (A/D) or when moving forward
+void AFlyffCharacter::UpdateCameraFollow(float dt)
 {
     if (bCameraFrozen) return;
 
-    // Decide how aggressively to follow:
-    float FollowSpeed = 0.f;
-    if (!FMath::IsNearlyZero(TurnAxis))
+    const float ActorYaw = GetActorRotation().Yaw;
+
+    if (bFirstTickYaw)
     {
-        // While pressing A/D, follow quickly so the camera stays behind
-        FollowSpeed = CameraFollowTurnSpeedDegPerSec;
+        LastActorYaw = ActorYaw;
+        bFirstTickYaw = false;
+    }
+
+    // detect turning by measuring actor yaw change
+    const float YawChange = FMath::FindDeltaAngleDegrees(LastActorYaw, ActorYaw);
+    const float TurnRateDegPerSec = (dt > KINDA_SMALL_NUMBER) ? (YawChange / dt) : 0.f;
+    const bool  bIsTurning = FMath::Abs(TurnRateDegPerSec) > 1.f;
+
+    float FollowSpeed = 0.f;
+    if (bIsTurning)
+    {
+        FollowSpeed = CameraFollowTurnSpeedDegPerSec;    // fast follow during A/D turning
     }
     else if (bAutoRun || ForwardAxis > 0.f)
     {
-        // Moving forward: gentle auto-realign
-        FollowSpeed = CameraAlignSpeedDegPerSec;
+        FollowSpeed = CameraAlignSpeedDegPerSec;         // gentle follow while moving forward
     }
     else
     {
-        // Not turning or moving forward → no auto follow
+        LastActorYaw = ActorYaw;
         return;
     }
 
-    const float TargetYaw = GetActorRotation().Yaw;
     FRotator Cam = SpringArm->GetComponentRotation();
-    const float Delta = FMath::FindDeltaAngleDegrees(Cam.Yaw, TargetYaw);
-
-    if (FMath::Abs(Delta) > 0.1f)
+    const float CamDelta = FMath::FindDeltaAngleDegrees(Cam.Yaw, ActorYaw);
+    if (!FMath::IsNearlyZero(CamDelta, 0.1f))
     {
-        const float Step = FMath::Clamp(Delta, -FollowSpeed * dt, FollowSpeed * dt);
+        const float Step = FMath::Clamp(CamDelta, -FollowSpeed * dt, FollowSpeed * dt);
         Cam.Yaw += Step;
         SpringArm->SetWorldRotation(Cam);
     }
+
+    LastActorYaw = ActorYaw;
 }
 
-// --- key handlers ---
+// ==============================
+// Key handlers
+// ==============================
+
+static float ClampAxis(float V){ return FMath::Clamp(V, -1.f, 1.f); }
 
 void AFlyffCharacter::W_Pressed()
 {

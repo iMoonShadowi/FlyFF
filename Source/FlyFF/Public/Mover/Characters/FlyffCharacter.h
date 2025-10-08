@@ -34,14 +34,17 @@ protected:
     float CameraAlignSpeedDegPerSec = 360.f;   // how fast W aligns camera behind character
 
     UPROPERTY(EditAnywhere, Category="Camera")
-    float CameraFollowTurnSpeedDegPerSec = 600.f; // camera follow speed while turning (A/D)
+    float CameraFollowTurnSpeedDegPerSec = 720.f; // camera follow speed while turning (A/D)
 
 private:
     // Movement/camera state
     float ForwardAxis = 0.f;   // +1 fwd (W), -1 back (S)
     float TurnAxis    = 0.f;   // -1 left (A), +1 right (D) — tank turn
+    float LastActorYaw = 0.f;
+    
+    
     bool  bAutoRun    = false; // toggled by W double-tap
-
+    bool  bFirstTickYaw = true;
     bool  bCameraFrozen = false; // RMB held → free-look; A/D won’t rotate camera
 
     // W double-tap detection
@@ -61,7 +64,7 @@ private:
     void ApplyTurn(float DeltaSeconds);
     void ApplyMovement(float DeltaSeconds);
     void ApplyFreeLook(float DeltaSeconds);
-    void AlignCameraBehindCharacter(float DeltaSeconds);
+    void UpdateCameraFollow(float DeltaSeconds); // new helper (replaces your Align function)
 
     static float ClampAxis(float V){ return FMath::Clamp(V, -1.f, 1.f); }
 };
