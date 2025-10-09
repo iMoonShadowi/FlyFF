@@ -6,6 +6,27 @@
 class USpringArmComponent;
 class UCameraComponent;
 
+USTRUCT(BlueprintType)
+struct FMoveTuning
+{
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float WalkSpeed    = 300.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float RunSpeed     = 600.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float SprintSpeed  = 900.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float TurnSpeedDeg = 140.f; // A/D turn speed
+};
+
+USTRUCT(BlueprintType)
+struct FCameraTuning
+{
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float FollowYawSpeed      = 360.f; // how fast cam follows facing
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float Lag                 = 12.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float RotLag              = 15.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float DefaultArmLength    = 450.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float DefaultPitchDegrees = -15.f;
+};
+
 UCLASS()
 class FLYFF_API AFlyffCharacter : public ACharacter
 {
@@ -19,52 +40,56 @@ protected:
     virtual void BeginPlay() override;
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
-    // Camera rig
+    // Components
     UPROPERTY(VisibleAnywhere, Category="Camera")
-    USpringArmComponent* SpringArm;
+    USpringArmComponent* SpringArm = nullptr;
 
     UPROPERTY(VisibleAnywhere, Category="Camera")
-    UCameraComponent* Camera;
+    UCameraComponent* Camera = nullptr;
 
-    // Camera behavior
-    UPROPERTY(EditAnywhere, Category="Camera")
-    float CameraYawSpeedDegPerSec = 120.f;     // A/D rotate speed when not RMB
+    // Tuning
+    UPROPERTY(EditAnywhere, Category="Tuning")
+    FMoveTuning MoveTune;
 
-    UPROPERTY(EditAnywhere, Category="Camera")
-    float CameraAlignSpeedDegPerSec = 360.f;   // how fast W aligns camera behind character
+    UPROPERTY(EditAnywhere, Category="Tuning")
+    FCameraTuning CamTune;
 
-    UPROPERTY(EditAnywhere, Category="Camera")
-    float CameraFollowTurnSpeedDegPerSec = 720.f; // camera follow speed while turning (A/D)
+    // Mesh offsets (so visual forward = +X; helpful for Paragon meshes)
+    UPROPERTY(EditAnywhere, Category="Mesh")
+    float MeshYawOffsetDeg = -90.f;
+
+    UPROPERTY(EditAnywhere, Category="Mesh")
+    float MeshZOffset = -90.f;
 
 private:
-    // Movement/camera state
-    float ForwardAxis = 0.f;   // +1 fwd (W), -1 back (S)
-    float TurnAxis    = 0.f;   // -1 left (A), +1 right (D) — tank turn
-    float LastActorYaw = 0.f;
-    
-    
-    bool  bAutoRun    = false; // toggled by W double-tap
-    bool  bFirstTickYaw = true;
-    bool  bCameraFrozen = false; // RMB held → free-look; A/D won’t rotate camera
+    // ---- State ----
+    float ForwardAxis = 0.f;   // W/S
+    float TurnAxis    = 0.f;   // A/D
+    bool  bWalk   = false;
+    bool  bSprint = false;
+    bool  bAutorun = false;
 
-    // W double-tap detection
-    double LastWPressTime = -1.0;
-    double DoubleTapSecs  = 0.30;
+    // Input handlers
+    void W_P(); void W_R(); void S_P(); void S_R();
+    void A_P(); void A_R(); void D_P(); void D_R();
+    void Space_P(); void Space_R();
+    void MMB_P();              // snap camera behind
+    void Shift_P(); void Shift_R();
+    void Alt_P();   void Alt_R();
+    void F_P();                // autorun toggle
+    void LMB_P();              // optional click-to-move
+    //debug 
+    void DebugYawLeft();
+    void DebugYawRight();
 
-    // Key handlers
-    void W_Pressed();  void W_Released();
-    void S_Pressed();  void S_Released();
-    void A_Pressed();  void A_Released();
-    void D_Pressed();  void D_Released();
-    void Space_Pressed(); void Space_Released();
-    void RMB_Pressed();   void RMB_Released();
-    void LMB_Pressed();   // click-to-move
-
-    // Per-tick logic
-    void ApplyTurn(float DeltaSeconds);
-    void ApplyMovement(float DeltaSeconds);
-    void ApplyFreeLook(float DeltaSeconds);
-    void UpdateCameraFollow(float DeltaSeconds); // new helper (replaces your Align function)
+    // Per-tick
+    void TickMove(float DeltaSeconds);
+    void TickCamera(float DeltaSeconds);
+    void SetSpeedByState();
 
     static float ClampAxis(float V){ return FMath::Clamp(V, -1.f, 1.f); }
+
+    // --- Debug ---
+    bool bCamDebug = false;
+    void ToggleCamDebug();
 };
