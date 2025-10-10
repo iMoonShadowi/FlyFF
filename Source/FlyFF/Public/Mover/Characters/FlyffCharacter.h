@@ -1,4 +1,5 @@
 #pragma once
+
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "FlyffCharacter.generated.h"
@@ -10,7 +11,8 @@ USTRUCT(BlueprintType)
 struct FMoveTuning
 {
     GENERATED_BODY()
-    UPROPERTY(EditAnywhere, BlueprintReadWrite) float WalkSpeed    = 300.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float WalkSpeed    = 250.f; // requested 250
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float RunSpeed     = 600.f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float SprintSpeed  = 900.f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float TurnSpeedDeg = 140.f; // A/D turn speed
@@ -20,9 +22,10 @@ USTRUCT(BlueprintType)
 struct FCameraTuning
 {
     GENERATED_BODY()
-    UPROPERTY(EditAnywhere, BlueprintReadWrite) float FollowYawSpeed      = 360.f; // how fast cam follows facing
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float FollowYawSpeed      = 360.f; // reserved
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float Lag                 = 12.f;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite) float RotLag              = 15.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float RotLag              = 15.f;  // keep off for tight follow
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float DefaultArmLength    = 450.f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float DefaultPitchDegrees = -15.f;
 };
@@ -65,9 +68,9 @@ private:
     // ---- State ----
     float ForwardAxis = 0.f;   // W/S
     float TurnAxis    = 0.f;   // A/D
-    bool  bWalk   = false;
-    bool  bSprint = false;
-    bool  bAutorun = false;
+    bool  bWalk   = false;     // toggled with X or held with Alt
+    bool  bSprint = false;     // Shift
+    bool  bAutorun = false;    // F
 
     // Input handlers
     void W_P(); void W_R(); void S_P(); void S_R();
@@ -78,9 +81,7 @@ private:
     void Alt_P();   void Alt_R();
     void F_P();                // autorun toggle
     void LMB_P();              // optional click-to-move
-    //debug 
-    void DebugYawLeft();
-    void DebugYawRight();
+    void X_P();                // Walk toggle
 
     // Per-tick
     void TickMove(float DeltaSeconds);
@@ -88,8 +89,4 @@ private:
     void SetSpeedByState();
 
     static float ClampAxis(float V){ return FMath::Clamp(V, -1.f, 1.f); }
-
-    // --- Debug ---
-    bool bCamDebug = false;
-    void ToggleCamDebug();
 };

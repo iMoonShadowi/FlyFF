@@ -8,9 +8,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/Engine.h"
-#include "DrawDebugHelpers.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"   // SimpleMoveToLocation (optional LMB click-to-move)
-#include "NavigationSystem.h"
 #include "InputCoreTypes.h"
 
 // ---------------- Constructor ----------------
@@ -26,7 +24,7 @@ AFlyffCharacter::AFlyffCharacter()
 
     // Follow the controller's yaw (so camera stays behind while A/D turns)
     SpringArm->bUsePawnControlRotation = true;
-    SpringArm->bInheritYaw   = true;   // IMPORTANT: was false before
+    SpringArm->bInheritYaw   = true;   // IMPORTANT: camera follows yaw
     SpringArm->bInheritPitch = false;  // keep fixed down-tilt from the arm
     SpringArm->bInheritRoll  = false;
 
@@ -70,7 +68,6 @@ AFlyffCharacter::AFlyffCharacter()
     }
 }
 
-
 // ---------------- BeginPlay ----------------
 void AFlyffCharacter::BeginPlay()
 {
@@ -80,7 +77,7 @@ void AFlyffCharacter::BeginPlay()
     bUseControllerRotationYaw = true;
     GetCharacterMovement()->bOrientRotationToMovement = false;
 
-    // Make sure the boom actually follows control rotation (not disabled)
+    // Make sure the boom actually follows control rotation
     if (SpringArm) SpringArm->bUsePawnControlRotation = true;
     if (Camera)    Camera->bUsePawnControlRotation    = false;
 
@@ -98,18 +95,6 @@ void AFlyffCharacter::BeginPlay()
     }
 
     GetCharacterMovement()->SetMovementMode(MOVE_Walking);
-}
-
-void AFlyffCharacter::ToggleCamDebug()
-{
-    bCamDebug = !bCamDebug;
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(
-            9998, 2.0f,
-            bCamDebug ? FColor::Green : FColor::Red,
-            bCamDebug ? TEXT("Camera Debug: ON") : TEXT("Camera Debug: OFF"));
-    }
 }
 
 // ---------------- Input ----------------
@@ -132,21 +117,17 @@ void AFlyffCharacter::SetupPlayerInputComponent(UInputComponent* IC)
     IC->BindKey(EKeys::LeftMouseButton,  IE_Pressed, this, &AFlyffCharacter::LMB_P);
     IC->BindKey(EKeys::MiddleMouseButton,IE_Pressed, this, &AFlyffCharacter::MMB_P);
 
-    // Speed & autorun
+    // Speed, autorun, walk toggle
     IC->BindKey(EKeys::LeftShift, IE_Pressed,  this, &AFlyffCharacter::Shift_P);
     IC->BindKey(EKeys::LeftShift, IE_Released, this, &AFlyffCharacter::Shift_R);
     IC->BindKey(EKeys::LeftAlt,   IE_Pressed,  this, &AFlyffCharacter::Alt_P);
     IC->BindKey(EKeys::LeftAlt,   IE_Released, this, &AFlyffCharacter::Alt_R);
     IC->BindKey(EKeys::F,         IE_Pressed,  this, &AFlyffCharacter::F_P);
+    IC->BindKey(EKeys::X,         IE_Pressed,  this, &AFlyffCharacter::X_P); // NEW: toggle walk/run
 
     // Jump
     IC->BindKey(EKeys::SpaceBar, IE_Pressed,  this, &AFlyffCharacter::Space_P);
     IC->BindKey(EKeys::SpaceBar, IE_Released, this, &AFlyffCharacter::Space_R);
-
-    //debug
-    IC->BindKey(EKeys::F9, IE_Pressed, this, &AFlyffCharacter::ToggleCamDebug);
-    IC->BindKey(EKeys::Q, IE_Pressed, this, &AFlyffCharacter::DebugYawLeft);
-    IC->BindKey(EKeys::E, IE_Pressed, this, &AFlyffCharacter::DebugYawRight);
 }
 
 // ---------------- Tick ----------------
@@ -155,42 +136,12 @@ void AFlyffCharacter::Tick(float dt)
     Super::Tick(dt);
     TickMove(dt);
     TickCamera(dt);
-if (bCamDebug && GEngine && SpringArm)
-{
-    const FRotator BoomRot = SpringArm->GetComponentRotation();
-    const float    BoomLen = SpringArm->TargetArmLength;
 
-    const float ActorYaw = GetActorRotation().Yaw;
-    float CtrlYaw = 0.f, CtrlPitch = 0.f;
-    if (AController* C = GetController())
-    {
-        const FRotator Ctrl = C->GetControlRotation();
-        CtrlYaw = Ctrl.Yaw;
-        CtrlPitch = Ctrl.Pitch;
-    }
-
-    const float DeltaYaw = FMath::FindDeltaAngleDegrees(CtrlYaw, ActorYaw);
-
-    // On-screen summary (uses a fixed key so it updates in place)
-    GEngine->AddOnScreenDebugMessage(9992, 0.f, FColor::Cyan,
-        FString::Printf(TEXT("BoomLen=%.1f  Boom(Yaw=%.1f Pitch=%.1f)  Ctrl(Yaw=%.1f Pitch=%.1f)  ActorYaw=%.1f  ΔYaw=%.1f  UsePCR=%d"),
-            BoomLen, BoomRot.Yaw, BoomRot.Pitch, CtrlYaw, CtrlPitch, ActorYaw, DeltaYaw,
-            SpringArm->bUsePawnControlRotation ? 1 : 0));
-
-    // Draw a line from capsule origin to camera
-    const FVector PawnLoc = GetCapsuleComponent() ? GetCapsuleComponent()->GetComponentLocation() : GetActorLocation();
-    const FVector CamLoc  = Camera ? Camera->GetComponentLocation() : (PawnLoc + SpringArm->GetForwardVector() * BoomLen);
-    DrawDebugLine(GetWorld(), PawnLoc, CamLoc, FColor::Cyan, /*bPersistent*/false, /*LifeTime*/0.f, /*Depth*/0, /*Thickness*/2.f);
-
-    // Draw a little axis at the camera
-    DrawDebugDirectionalArrow(GetWorld(), CamLoc, CamLoc + SpringArm->GetForwardVector()*75.f,
-                              20.f, FColor::Green, false, 0.f, 0, 2.f);
-}
     // quick overlay
     if (GEngine)
         GEngine->AddOnScreenDebugMessage(7, 0.f, FColor::Cyan,
-            FString::Printf(TEXT("Speed=%.0f  Fwd=%.1f  Turn=%.1f  Auto=%d"),
-            GetCharacterMovement()->MaxWalkSpeed, ForwardAxis, TurnAxis, bAutorun?1:0));
+            FString::Printf(TEXT("Speed=%.0f  Fwd=%.1f  Turn=%.1f  Auto=%d  Walk=%d Sprint=%d"),
+            GetCharacterMovement()->MaxWalkSpeed, ForwardAxis, TurnAxis, bAutorun?1:0, bWalk?1:0, bSprint?1:0));
 }
 
 // ---------------- Movement ----------------
@@ -210,21 +161,18 @@ void AFlyffCharacter::TickMove(float dt)
 
 void AFlyffCharacter::SetSpeedByState()
 {
+    // Walk overrides Sprint; else Sprint > Run
     float Target = MoveTune.RunSpeed;
-    if (bWalk)   Target = MoveTune.WalkSpeed;
-    if (bSprint) Target = MoveTune.SprintSpeed;
+    if (bWalk)          Target = MoveTune.WalkSpeed;
+    else if (bSprint)   Target = MoveTune.SprintSpeed;
+
     GetCharacterMovement()->MaxWalkSpeed = Target;
 }
 
 // ---------------- Camera ----------------
-void AFlyffCharacter::TickCamera(float dt)
+void AFlyffCharacter::TickCamera(float /*dt*/)
 {
     if (!SpringArm) return;
-
-    // No manual yaw forcing here. The chain is:
-    // A/D -> AddControllerYawInput -> Controller Yaw
-    // -> Pawn Yaw (bUseControllerRotationYaw)
-    // -> Camera Yaw (SpringArm bUsePawnControlRotation + bInheritYaw)
 
     // Ensure we’re viewing THIS pawn/camera (useful if you swap pawns)
     if (APlayerController* PC = Cast<APlayerController>(GetController()))
@@ -232,32 +180,7 @@ void AFlyffCharacter::TickCamera(float dt)
         if (Camera && !Camera->IsActive()) Camera->Activate(true);
         if (PC->GetViewTarget() != this)   PC->SetViewTarget(this);
     }
-
-    // Optional debug (safe to keep)
-    if (bCamDebug && GEngine)
-    {
-        const FRotator BoomRot = SpringArm->GetComponentRotation();
-        const float    BoomLen = SpringArm->TargetArmLength;
-
-        float CtrlYaw = 0.f, CtrlPitch = 0.f;
-        if (AController* C = GetController())
-        {
-            const FRotator Ctrl = C->GetControlRotation();
-            CtrlYaw = Ctrl.Yaw;
-            CtrlPitch = Ctrl.Pitch;
-        }
-
-        const float ActorYaw = GetActorRotation().Yaw;
-        const float DeltaYaw = FMath::FindDeltaAngleDegrees(CtrlYaw, ActorYaw);
-
-        GEngine->AddOnScreenDebugMessage(9992, 0.f, FColor::Cyan,
-            FString::Printf(TEXT("BoomLen=%.1f  Boom(Yaw=%.1f Pitch=%.1f)  Ctrl(Yaw=%.1f Pitch=%.1f)  ActorYaw=%.1f  ΔYaw=%.1f  UsePCR=%d"),
-                BoomLen, BoomRot.Yaw, BoomRot.Pitch, CtrlYaw, CtrlPitch, ActorYaw, DeltaYaw,
-                SpringArm->bUsePawnControlRotation ? 1 : 0));
-    }
 }
-
-
 
 // ---------------- Input handlers ----------------
 // WASD
@@ -266,17 +189,10 @@ void AFlyffCharacter::W_R(){ ForwardAxis = ClampAxis(ForwardAxis - 1.f); }
 void AFlyffCharacter::S_P(){ ForwardAxis = ClampAxis(ForwardAxis - 1.f); bAutorun=false; }
 void AFlyffCharacter::S_R(){ ForwardAxis = ClampAxis(ForwardAxis + 1.f); }
 
-void AFlyffCharacter::A_P(){ TurnAxis = ClampAxis(TurnAxis - 1.f);
-    if (GEngine) GEngine->AddOnScreenDebugMessage(1111, 1.f, FColor::Yellow, TEXT("A_P")); }
-void AFlyffCharacter::A_R(){ TurnAxis = ClampAxis(TurnAxis + 1.f);
-    if (GEngine) GEngine->AddOnScreenDebugMessage(1112, 1.f, FColor::Yellow, TEXT("A_R")); }
-void AFlyffCharacter::D_P(){ TurnAxis = ClampAxis(TurnAxis + 1.f);
-    if (GEngine) GEngine->AddOnScreenDebugMessage(1113, 1.f, FColor::Yellow, TEXT("D_P")); }
-void AFlyffCharacter::D_R(){ TurnAxis = ClampAxis(TurnAxis - 1.f);
-    if (GEngine) GEngine->AddOnScreenDebugMessage(1114, 1.f, FColor::Yellow, TEXT("D_R")); }
-//debug
-void AFlyffCharacter::DebugYawLeft()  { AddControllerYawInput(-10.f); }
-void AFlyffCharacter::DebugYawRight() { AddControllerYawInput(+10.f); }
+void AFlyffCharacter::A_P(){ TurnAxis = ClampAxis(TurnAxis - 1.f); }
+void AFlyffCharacter::A_R(){ TurnAxis = ClampAxis(TurnAxis + 1.f); }
+void AFlyffCharacter::D_P(){ TurnAxis = ClampAxis(TurnAxis + 1.f); }
+void AFlyffCharacter::D_R(){ TurnAxis = ClampAxis(TurnAxis - 1.f); }
 
 // Jump
 void AFlyffCharacter::Space_P(){ Jump(); }
@@ -294,11 +210,26 @@ void AFlyffCharacter::MMB_P()
 }
 
 // Speed & autorun
-void AFlyffCharacter::Shift_P(){ bSprint = true; }
+void AFlyffCharacter::Shift_P(){ if (!bWalk) bSprint = true; } // sprint only if not in walk toggle
 void AFlyffCharacter::Shift_R(){ bSprint = false; }
-void AFlyffCharacter::Alt_P()  { bWalk   = true;  bSprint=false; }
-void AFlyffCharacter::Alt_R()  { bWalk   = false; }
+void AFlyffCharacter::Alt_P()  { bWalk   = true;  bSprint=false; } // hold-to-walk
+void AFlyffCharacter::Alt_R()  { bWalk   = false; }                // release back to run
 void AFlyffCharacter::F_P()    { bAutorun = !bAutorun; }
+
+// Toggle walk/run (X)
+void AFlyffCharacter::X_P()
+{
+    bWalk = !bWalk;
+    if (bWalk)
+    {
+        bSprint = false; // entering walk cancels sprint
+        if (GEngine) GEngine->AddOnScreenDebugMessage(9911, 1.5f, FColor::Yellow, TEXT("Walk: ON"));
+    }
+    else
+    {
+        if (GEngine) GEngine->AddOnScreenDebugMessage(9911, 1.5f, FColor::Yellow, TEXT("Walk: OFF (Run)"));
+    }
+}
 
 // Optional click-to-move (works fine with coupled camera)
 void AFlyffCharacter::LMB_P()
