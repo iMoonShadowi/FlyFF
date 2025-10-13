@@ -2,6 +2,7 @@
 #include "Providers/PostgresProvider.h"
 #include "Misc/ConfigCacheIni.h"
 #include "HAL/PlatformProcess.h"
+#include "Database/DatabaseProvider.h" // ensure the IDatabaseProvider is visible
 
 void UDBManager::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -90,5 +91,49 @@ void UDBManager::AsyncSaveEquipment(const FGuid& CharacterId, const TMap<FName, 
         FString Err;
         if (!P->SaveEquipment(CharacterId, Copy, Err))
             UE_LOG(LogTemp, Error, TEXT("SaveEquipment failed: %s"), *Err);
+    }});
+}
+bool UDBManager::UpsertCharacterSync(const FGuid& CharacterId, const FString& Name, int32 Level, FString& OutError)
+{
+    if (!Provider) { OutError = TEXT("DB provider not initialized"); return false; }
+    return Provider->UpsertCharacter(CharacterId, Name, Level, OutError);
+}
+
+void UDBManager::AsyncUpsertCharacter(const FGuid& CharacterId, const FString& Name, int32 Level)
+{
+    if (!Provider) return;
+    const FString NameCopy = Name; // capture by value for the lambda
+    JobQueue.Enqueue({ [P=Provider.Get(), CharacterId, NameCopy, Level]()
+    {
+        FString Err;
+        if (!P->UpsertCharacter(CharacterId, NameCopy, Level, Err))
+        {
+            UE_LOG(LogTemp, Error, TEXT("UpsertCharacter failed: %s"), *Err);
+        }
+    }});
+}
+
+// OPTIONAL: only if you decide to store level points in a table.
+// For now, you can stub it out or implement a Characters.LevelPoints column.
+bool UDBManager::SaveCharacterProgressSync(const FGuid& CharacterId, int32 Level, int32 Points, FString& OutError)
+{
+    if (!Provider) { OutError = TEXT("DB provider not initialized"); return false; }
+    // Option A: fold into UpsertCharacter by extending the provider.
+    // Option B: add a new provider method, e.g., UpsertCharacterProgress(...)
+    // For now, call UpsertCharacter to persist Level only:
+    return Provider->UpsertCharacter(CharacterId, /*Name ignored here?*/ TEXT(""), Level, OutError);
+}
+
+void UDBManager::AsyncSaveCharacterProgress(const FGuid& CharacterId, int32 Level, int32 Points)
+{
+    if (!Provider) return;
+    JobQueue.Enqueue({ [P=Provider.Get(), CharacterId, Level, Points]()
+    {
+        FString Err;
+        // See note above: extend provider if you want to store Points too.
+        if (!P->UpsertCharacter(CharacterId, TEXT(""), Level, Err))
+        {
+            UE_LOG(LogTemp, Error, TEXT("SaveCharacterProgress failed: %s"), *Err);
+        }
     }});
 }

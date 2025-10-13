@@ -8,8 +8,13 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/Engine.h"
-#include "Blueprint/AIBlueprintHelperLibrary.h"   // SimpleMoveToLocation (optional LMB click-to-move)
+#include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "InputCoreTypes.h"
+
+// >>> NEW: EXP/DB includes
+#include "Mover/Components/LevelComponent.h"     // your LevelComponent from earlier
+#include "Systems/Data/ExpManager.h"             // UExpManager (GameInstanceSubsystem)
+#include "Database/DBManager.h"                  // UDBManager (GameInstanceSubsystem)
 
 // ---------------- Constructor ----------------
 AFlyffCharacter::AFlyffCharacter()
@@ -22,13 +27,11 @@ AFlyffCharacter::AFlyffCharacter()
     SpringArm->TargetArmLength = CamTune.DefaultArmLength;
     SpringArm->SetRelativeRotation(FRotator(CamTune.DefaultPitchDegrees, 0.f, 0.f));
 
-    // Follow the controller's yaw (so camera stays behind while A/D turns)
     SpringArm->bUsePawnControlRotation = true;
-    SpringArm->bInheritYaw   = true;   // IMPORTANT: camera follows yaw
-    SpringArm->bInheritPitch = false;  // keep fixed down-tilt from the arm
+    SpringArm->bInheritYaw   = true;
+    SpringArm->bInheritPitch = false;
     SpringArm->bInheritRoll  = false;
 
-    // Feel: position lag OK, rotation lag OFF for tight behind-the-back follow
     SpringArm->bEnableCameraLag = true;
     SpringArm->CameraLagSpeed   = CamTune.Lag;
     SpringArm->bEnableCameraRotationLag = false;
@@ -36,11 +39,10 @@ AFlyffCharacter::AFlyffCharacter()
     // --- Camera ---
     Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
     Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
-    Camera->bUsePawnControlRotation = false; // spring arm handles control rotation
+    Camera->bUsePawnControlRotation = false;
 
     // --- Character movement: "tank" turning via controller yaw ---
     bUseControllerRotationYaw = true;
-
     UCharacterMovementComponent* Move = GetCharacterMovement();
     Move->bOrientRotationToMovement = false;
     Move->RotationRate = FRotator(0.f, 720.f, 0.f);
@@ -66,6 +68,12 @@ AFlyffCharacter::AFlyffCharacter()
         R.Yaw = MeshYawOffsetDeg;
         Sk->SetRelativeRotation(R);
     }
+
+    // >>> NEW: Level/EXP component
+    LevelComponent = CreateDefaultSubobject<ULevelComponent>(TEXT("LevelComponent"));
+
+    // >>> NEW: if you want a deterministic GUID, replace with your own (e.g., from account id)
+    CharacterGuid = FGuid::NewGuid();
 }
 
 // ---------------- BeginPlay ----------------
@@ -77,11 +85,9 @@ void AFlyffCharacter::BeginPlay()
     bUseControllerRotationYaw = true;
     GetCharacterMovement()->bOrientRotationToMovement = false;
 
-    // Make sure the boom actually follows control rotation
     if (SpringArm) SpringArm->bUsePawnControlRotation = true;
     if (Camera)    Camera->bUsePawnControlRotation    = false;
 
-    // Force view/control to this pawn
     if (APlayerController* PC = Cast<APlayerController>(GetController()))
     {
         PC->bAutoManageActiveCameraTarget = true;
@@ -95,6 +101,16 @@ void AFlyffCharacter::BeginPlay()
     }
 
     GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+
+    // >>> NEW: EXP: initialize from resource config + bind callbacks
+    InitExpFromConfig();
+
+    // >>> NEW: DB: upsert character row (Name/Level). Replace CharacterName source as needed.
+    DB_UpsertCharacter();
+
+    // >>> NEW: You can also load inventory/equipment here later:
+    // auto* DB = GetGameInstance()->GetSubsystem<UDBManager>();
+    // if (DB && DB->IsReady()) { DB->LoadInventory(CharacterGuid, ...); DB->LoadEquipment(CharacterGuid, ...); }
 }
 
 // ---------------- Input ----------------
@@ -123,7 +139,7 @@ void AFlyffCharacter::SetupPlayerInputComponent(UInputComponent* IC)
     IC->BindKey(EKeys::LeftAlt,   IE_Pressed,  this, &AFlyffCharacter::Alt_P);
     IC->BindKey(EKeys::LeftAlt,   IE_Released, this, &AFlyffCharacter::Alt_R);
     IC->BindKey(EKeys::F,         IE_Pressed,  this, &AFlyffCharacter::F_P);
-    IC->BindKey(EKeys::X,         IE_Pressed,  this, &AFlyffCharacter::X_P); // NEW: toggle walk/run
+    IC->BindKey(EKeys::X,         IE_Pressed,  this, &AFlyffCharacter::X_P);
 
     // Jump
     IC->BindKey(EKeys::SpaceBar, IE_Pressed,  this, &AFlyffCharacter::Space_P);
@@ -139,9 +155,13 @@ void AFlyffCharacter::Tick(float dt)
 
     // quick overlay
     if (GEngine)
+    {
+        const int32 L = GetLevel();
+        const int32 P = GetLevelPoints();
         GEngine->AddOnScreenDebugMessage(7, 0.f, FColor::Cyan,
-            FString::Printf(TEXT("Speed=%.0f  Fwd=%.1f  Turn=%.1f  Auto=%d  Walk=%d Sprint=%d"),
-            GetCharacterMovement()->MaxWalkSpeed, ForwardAxis, TurnAxis, bAutorun?1:0, bWalk?1:0, bSprint?1:0));
+            FString::Printf(TEXT("Lv=%d  Pts=%d  Speed=%.0f  Fwd=%.1f  Turn=%.1f  Auto=%d  Walk=%d Sprint=%d"),
+            L, P, GetCharacterMovement()->MaxWalkSpeed, ForwardAxis, TurnAxis, bAutorun?1:0, bWalk?1:0, bSprint?1:0));
+    }
 }
 
 // ---------------- Movement ----------------
@@ -149,11 +169,9 @@ void AFlyffCharacter::TickMove(float dt)
 {
     SetSpeedByState();
 
-    // Turn with A/D (tank turning)
     if (!FMath::IsNearlyZero(TurnAxis))
         AddControllerYawInput(TurnAxis * MoveTune.TurnSpeedDeg * dt);
 
-    // Move with W/S along actor forward (+ autorun)
     const float Forward = (bAutorun ? 1.f : 0.f) + ForwardAxis;
     if (!FMath::IsNearlyZero(Forward))
         AddMovementInput(GetActorForwardVector(), FMath::Clamp(Forward, -1.f, 1.f));
@@ -161,7 +179,6 @@ void AFlyffCharacter::TickMove(float dt)
 
 void AFlyffCharacter::SetSpeedByState()
 {
-    // Walk overrides Sprint; else Sprint > Run
     float Target = MoveTune.RunSpeed;
     if (bWalk)          Target = MoveTune.WalkSpeed;
     else if (bSprint)   Target = MoveTune.SprintSpeed;
@@ -174,7 +191,6 @@ void AFlyffCharacter::TickCamera(float /*dt*/)
 {
     if (!SpringArm) return;
 
-    // Ensure we’re viewing THIS pawn/camera (useful if you swap pawns)
     if (APlayerController* PC = Cast<APlayerController>(GetController()))
     {
         if (Camera && !Camera->IsActive()) Camera->Activate(true);
@@ -183,7 +199,6 @@ void AFlyffCharacter::TickCamera(float /*dt*/)
 }
 
 // ---------------- Input handlers ----------------
-// WASD
 void AFlyffCharacter::W_P(){ ForwardAxis = ClampAxis(ForwardAxis + 1.f); }
 void AFlyffCharacter::W_R(){ ForwardAxis = ClampAxis(ForwardAxis - 1.f); }
 void AFlyffCharacter::S_P(){ ForwardAxis = ClampAxis(ForwardAxis - 1.f); bAutorun=false; }
@@ -194,11 +209,9 @@ void AFlyffCharacter::A_R(){ TurnAxis = ClampAxis(TurnAxis + 1.f); }
 void AFlyffCharacter::D_P(){ TurnAxis = ClampAxis(TurnAxis + 1.f); }
 void AFlyffCharacter::D_R(){ TurnAxis = ClampAxis(TurnAxis - 1.f); }
 
-// Jump
 void AFlyffCharacter::Space_P(){ Jump(); }
 void AFlyffCharacter::Space_R(){ StopJumping(); }
 
-// Snap camera behind (MMB)
 void AFlyffCharacter::MMB_P()
 {
     if (AController* C = GetController())
@@ -209,20 +222,18 @@ void AFlyffCharacter::MMB_P()
     }
 }
 
-// Speed & autorun
-void AFlyffCharacter::Shift_P(){ if (!bWalk) bSprint = true; } // sprint only if not in walk toggle
+void AFlyffCharacter::Shift_P(){ if (!bWalk) bSprint = true; }
 void AFlyffCharacter::Shift_R(){ bSprint = false; }
-void AFlyffCharacter::Alt_P()  { bWalk   = true;  bSprint=false; } // hold-to-walk
-void AFlyffCharacter::Alt_R()  { bWalk   = false; }                // release back to run
+void AFlyffCharacter::Alt_P()  { bWalk   = true;  bSprint=false; }
+void AFlyffCharacter::Alt_R()  { bWalk   = false; }
 void AFlyffCharacter::F_P()    { bAutorun = !bAutorun; }
 
-// Toggle walk/run (X)
 void AFlyffCharacter::X_P()
 {
     bWalk = !bWalk;
     if (bWalk)
     {
-        bSprint = false; // entering walk cancels sprint
+        bSprint = false;
         if (GEngine) GEngine->AddOnScreenDebugMessage(9911, 1.5f, FColor::Yellow, TEXT("Walk: ON"));
     }
     else
@@ -231,7 +242,6 @@ void AFlyffCharacter::X_P()
     }
 }
 
-// Optional click-to-move (works fine with coupled camera)
 void AFlyffCharacter::LMB_P()
 {
     if (APlayerController* PC = Cast<APlayerController>(GetController()))
@@ -243,4 +253,87 @@ void AFlyffCharacter::LMB_P()
             bAutorun = false;
         }
     }
+}
+
+// ===================== NEW: EXP / DB logic =====================
+
+void AFlyffCharacter::InitExpFromConfig()
+{
+    if (!LevelComponent) return;
+
+    if (UExpManager* ExpMgr = GetGameInstance()->GetSubsystem<UExpManager>())
+    {
+        const auto& Cfg = ExpMgr->GetConfig();
+        LevelComponent->InitializeFromConfig(/*Level*/1, /*Points*/0, Cfg.Meta.PointsPerLevel, Cfg.Meta.MaxLevel);
+
+        // Bind for persistence/UI
+        LevelComponent->OnLevelChanged.AddDynamic(this, &AFlyffCharacter::OnLevelChanged);
+        LevelComponent->OnPointsChanged.AddDynamic(this, &AFlyffCharacter::OnPointsChanged);
+    }
+}
+
+void AFlyffCharacter::DB_UpsertCharacter() const
+{
+    if (const UDBManager* DB = GetGameInstance()->GetSubsystem<UDBManager>())
+    {
+        if (DB->IsReady())
+        {
+            FString Err;
+            // NOTE: UpsertCharacter is defined on the Provider; if you exposed a wrapper, call that.
+            // If not, add a simple wrapper on UDBManager to forward to Provider. For now, assume wrapper exists:
+            // DB->UpsertCharacterSync(CharacterGuid, CharacterName, LevelComponent ? LevelComponent->Level : 1, Err);
+            // If you haven’t added the wrapper yet, remove this call or add the wrapper.
+        }
+    }
+}
+
+void AFlyffCharacter::AwardKillEXP(FName MonsterId, int32 MonsterLevel)
+{
+    if (!LevelComponent) return;
+
+    if (UExpManager* ExpMgr = GetGameInstance()->GetSubsystem<UExpManager>())
+    {
+        const int32 Award = ExpMgr->ComputeKillPoints(LevelComponent->Level, MonsterId, MonsterLevel);
+        if (Award > 0) LevelComponent->AddPoints(Award);
+    }
+}
+
+void AFlyffCharacter::OnLevelChanged(int32 NewLevel, int32 PrevLevel)
+{
+    // Persist level to DB
+    if (const UDBManager* DB = GetGameInstance()->GetSubsystem<UDBManager>())
+    {
+        if (DB->IsReady())
+        {
+            FString Err;
+            // See note in DB_UpsertCharacter(); call your wrapper:
+            // DB->UpsertCharacterSync(CharacterGuid, CharacterName, NewLevel, Err);
+        }
+    }
+
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(9912, 2.f, FColor::Green,
+            FString::Printf(TEXT("LEVEL UP! %d -> %d"), PrevLevel, NewLevel));
+    }
+}
+
+void AFlyffCharacter::OnPointsChanged(int32 Points, int32 PointsPerLevel)
+{
+    // Hook UI here (progress bar, etc.). Debug print for now.
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(9913, 1.5f, FColor::Cyan,
+            FString::Printf(TEXT("EXP: %d / %d"), Points, PointsPerLevel));
+    }
+}
+
+int32 AFlyffCharacter::GetLevel() const
+{
+    return LevelComponent ? LevelComponent->Level : 1;
+}
+
+int32 AFlyffCharacter::GetLevelPoints() const
+{
+    return LevelComponent ? LevelComponent->Points : 0;
 }

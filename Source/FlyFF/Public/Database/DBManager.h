@@ -28,6 +28,20 @@ public:
     void AsyncSaveInventory(const FGuid& CharacterId, const TArray<FItemInstanceRow>& Items);
     void AsyncSaveEquipment(const FGuid& CharacterId, const TMap<FName, FItemInstanceRow>& Equipped);
 
+    // === Character wrappers (sync + async) ===
+
+    // Synchronous upsert of the Characters row.
+    // Safe to call on BeginPlay/login (it’s quick). Returns false + Err on failure.
+    bool UpsertCharacterSync(const FGuid& CharacterId, const FString& Name, int32 Level, FString& OutError);
+
+    // Fire-and-forget version that runs on the DB worker thread.
+    void AsyncUpsertCharacter(const FGuid& CharacterId, const FString& Name, int32 Level);
+
+    // (Optional) If you want to persist the EXP bucket separately later:
+    bool SaveCharacterProgressSync(const FGuid& CharacterId, int32 Level, int32 Points, FString& OutError);
+    void AsyncSaveCharacterProgress(const FGuid& CharacterId, int32 Level, int32 Points);
+
+
 private:
     FString ResolveConnString() const; // Env -> Ini
     TUniquePtr<IDatabaseProvider> Provider;
