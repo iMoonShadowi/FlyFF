@@ -1,6 +1,8 @@
 #pragma once
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "DBTypes.h"
+#include "Async/Future.h"        
+#include "HAL/ThreadSafeBool.h"  
 #include "DBManager.generated.h"
 
 class IDatabaseProvider;
@@ -46,10 +48,11 @@ private:
     FString ResolveConnString() const; // Env -> Ini
     TUniquePtr<IDatabaseProvider> Provider;
     bool bReady = false;
-
+    
     struct FDBJob { TFunction<void()> Fn; };
     TQueue<FDBJob, EQueueMode::Mpsc> JobQueue;
     FThreadSafeBool bRunWorker = false;
+    TFuture<void> WorkerTask;
     TUniquePtr<FRunnableThread> WorkerThread;
 
     void StartWorker();

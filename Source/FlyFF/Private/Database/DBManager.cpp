@@ -1,8 +1,11 @@
-#include "DBManager.h"
+#include "Database/DBManager.h"
+#include "Database/DatabaseProvider.h"   // IDatabaseProvider
 #include "Providers/PostgresProvider.h"
+
 #include "Misc/ConfigCacheIni.h"
-#include "HAL/PlatformProcess.h"
-#include "Database/DatabaseProvider.h" // ensure the IDatabaseProvider is visible
+#include "HAL/PlatformMisc.h"            // FPlatformMisc::GetEnvironmentVariable
+#include "Async/Async.h"
+#include "HAL/PlatformProcess.h"         // Sleep
 
 void UDBManager::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -11,7 +14,10 @@ void UDBManager::Initialize(FSubsystemCollectionBase& Collection)
     const FString Conn = ResolveConnString();
 
     bReady = Provider && Provider->Init(Conn, Err) && Provider->EnsureSchema(Err);
-    if (!bReady) UE_LOG(LogTemp, Error, TEXT("Postgres init failed: %s"), *Err);
+    if (!bReady)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Postgres init failed: %s"), *Err);
+    }
 
     StartWorker();
     OnDBReady.Broadcast(bReady);
@@ -20,13 +26,17 @@ void UDBManager::Initialize(FSubsystemCollectionBase& Collection)
 void UDBManager::Deinitialize()
 {
     StopWorker();
-    if (Provider) { Provider->Shutdown(); Provider.Reset(); }
+    if (Provider)
+    {
+        Provider->Shutdown();
+        Provider.Reset();
+    }
 }
 
 FString UDBManager::ResolveConnString() const
 {
     // 1) Env var
-    FString Env = FPlatformMisc::GetEnvironmentVariable(TEXT("FLYFF_PG"));
+    const FString Env = FPlatformMisc::GetEnvironmentVariable(TEXT("FLYFF_PG"));
     if (!Env.IsEmpty()) return Env;
 
     // 2) DefaultGame.ini
@@ -40,25 +50,40 @@ FString UDBManager::ResolveConnString() const
     return TEXT("host=127.0.0.1 port=5432 dbname=flyff user=flyff password=flyff sslmode=disable");
 }
 
+// ---------- worker thread (Async) ----------
+
 void UDBManager::StartWorker()
 {
     bRunWorker = true;
-    WorkerThread = TUniquePtr<FRunnableThread>(FRunnableThread::Create([this]()
+
+    // Run a persistent loop on its own thread to drain the queue
+    WorkerTask = Async(EAsyncExecution::Thread, [this]()
     {
         while (bRunWorker)
         {
             FDBJob Job;
-            if (JobQueue.Dequeue(Job)) { Job.Fn(); }
-            FPlatformProcess::Sleep(0.002f);
+            if (JobQueue.Dequeue(Job))
+            {
+                Job.Fn(); // execute DB job on this thread
+            }
+            else
+            {
+                FPlatformProcess::Sleep(0.002f); // light backoff
+            }
         }
-    }, TEXT("FlyFF-DBWorker")));
+    });
 }
 
 void UDBManager::StopWorker()
 {
     bRunWorker = false;
-    if (WorkerThread) { WorkerThread->Kill(true); WorkerThread.Reset(); }
+    if (WorkerTask.Valid())
+    {
+        WorkerTask.Wait(); // join
+    }
 }
+
+// ---------- sync loads ----------
 
 bool UDBManager::LoadInventory(const FGuid& CharacterId, TArray<FItemInstanceRow>& OutItems, FString& OutError)
 {
@@ -70,15 +95,19 @@ bool UDBManager::LoadEquipment(const FGuid& CharacterId, TMap<FName, FItemInstan
     return Provider ? Provider->LoadEquipment(CharacterId, OutEquipped, OutError) : false;
 }
 
+// ---------- async saves ----------
+
 void UDBManager::AsyncSaveInventory(const FGuid& CharacterId, const TArray<FItemInstanceRow>& Items)
 {
     if (!Provider) return;
     TArray<FItemInstanceRow> Copy = Items;
-    JobQueue.Enqueue({ [P=Provider.Get(), CharacterId, Copy]()
+    JobQueue.Enqueue({ [P = Provider.Get(), CharacterId, Copy]()
     {
         FString Err;
         if (!P->SaveInventory(CharacterId, Copy, Err))
+        {
             UE_LOG(LogTemp, Error, TEXT("SaveInventory failed: %s"), *Err);
+        }
     }});
 }
 
@@ -86,13 +115,18 @@ void UDBManager::AsyncSaveEquipment(const FGuid& CharacterId, const TMap<FName, 
 {
     if (!Provider) return;
     TMap<FName, FItemInstanceRow> Copy = Equipped;
-    JobQueue.Enqueue({ [P=Provider.Get(), CharacterId, Copy]()
+    JobQueue.Enqueue({ [P = Provider.Get(), CharacterId, Copy]()
     {
         FString Err;
         if (!P->SaveEquipment(CharacterId, Copy, Err))
+        {
             UE_LOG(LogTemp, Error, TEXT("SaveEquipment failed: %s"), *Err);
+        }
     }});
 }
+
+// ---------- character wrappers ----------
+
 bool UDBManager::UpsertCharacterSync(const FGuid& CharacterId, const FString& Name, int32 Level, FString& OutError)
 {
     if (!Provider) { OutError = TEXT("DB provider not initialized"); return false; }
@@ -102,8 +136,8 @@ bool UDBManager::UpsertCharacterSync(const FGuid& CharacterId, const FString& Na
 void UDBManager::AsyncUpsertCharacter(const FGuid& CharacterId, const FString& Name, int32 Level)
 {
     if (!Provider) return;
-    const FString NameCopy = Name; // capture by value for the lambda
-    JobQueue.Enqueue({ [P=Provider.Get(), CharacterId, NameCopy, Level]()
+    const FString NameCopy = Name;
+    JobQueue.Enqueue({ [P = Provider.Get(), CharacterId, NameCopy, Level]()
     {
         FString Err;
         if (!P->UpsertCharacter(CharacterId, NameCopy, Level, Err))
@@ -113,24 +147,19 @@ void UDBManager::AsyncUpsertCharacter(const FGuid& CharacterId, const FString& N
     }});
 }
 
-// OPTIONAL: only if you decide to store level points in a table.
-// For now, you can stub it out or implement a Characters.LevelPoints column.
-bool UDBManager::SaveCharacterProgressSync(const FGuid& CharacterId, int32 Level, int32 Points, FString& OutError)
+// Optional: if you later add LevelPoints to Characters table
+bool UDBManager::SaveCharacterProgressSync(const FGuid& CharacterId, int32 Level, int32 /*Points*/, FString& OutError)
 {
     if (!Provider) { OutError = TEXT("DB provider not initialized"); return false; }
-    // Option A: fold into UpsertCharacter by extending the provider.
-    // Option B: add a new provider method, e.g., UpsertCharacterProgress(...)
-    // For now, call UpsertCharacter to persist Level only:
-    return Provider->UpsertCharacter(CharacterId, /*Name ignored here?*/ TEXT(""), Level, OutError);
+    return Provider->UpsertCharacter(CharacterId, TEXT(""), Level, OutError);
 }
 
-void UDBManager::AsyncSaveCharacterProgress(const FGuid& CharacterId, int32 Level, int32 Points)
+void UDBManager::AsyncSaveCharacterProgress(const FGuid& CharacterId, int32 Level, int32 /*Points*/)
 {
     if (!Provider) return;
-    JobQueue.Enqueue({ [P=Provider.Get(), CharacterId, Level, Points]()
+    JobQueue.Enqueue({ [P = Provider.Get(), CharacterId, Level]()
     {
         FString Err;
-        // See note above: extend provider if you want to store Points too.
         if (!P->UpsertCharacter(CharacterId, TEXT(""), Level, Err))
         {
             UE_LOG(LogTemp, Error, TEXT("SaveCharacterProgress failed: %s"), *Err);

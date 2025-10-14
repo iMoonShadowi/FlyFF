@@ -1,10 +1,12 @@
-#include "Providers/PostgresProvider.h"
-#include "DBTypes.h"
+#include "Database/Providers/PostgresProvider.h"
+#include "Database/DBTypes.h"
 #include "Misc/Guid.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
-extern "C" { #include "libpq-fe.h" }
+extern "C" {
+    #include "libpq-fe.h"
+}
 
 static void LogPQErr(PGconn* Ctx, const TCHAR* Ctxt)
 {
