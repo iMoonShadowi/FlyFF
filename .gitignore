@@ -72,3 +72,27 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+
+# Unreal build artifacts & caches
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.idea/
+*.VC.db
+*.opensdf
+*.sdf
+*.sln.DotSettings.user
+
+# Cooked/packaged builds
+WindowsNoEditor/
+LinuxNoEditor/
+MacNoEditor/
+*Server/
+
+# Local config / cache
+Config/DefaultEditorPerProjectUserSettings.ini
+Config/*.local
+Content/Collections/
