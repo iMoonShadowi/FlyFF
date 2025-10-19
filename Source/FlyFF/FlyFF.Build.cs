@@ -22,7 +22,10 @@ public class FlyFF : ModuleRules
             "JsonUtilities",
             "GameplayTags",
             "NavigationSystem",
-            "AIModule"
+            "AIModule",
+            "Networking", 
+            "Sockets",
+            "HTTP"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[] { });
@@ -104,7 +107,7 @@ public class FlyFF : ModuleRules
             if (!File.Exists(LibpqDll))
                 throw new BuildException($"Missing libpq.dll at: {LibpqDll}");
 
-            // If your bin doesn’t have these exact names, comment them out or rename to match.
+            // If your bin doesnï¿½t have these exact names, comment them out or rename to match.
             if (!File.Exists(SslDll)) throw new BuildException($"Missing OpenSSL dll at: {SslDll} (rename in Build.cs if your version differs)");
             if (!File.Exists(CryptoDll)) throw new BuildException($"Missing OpenSSL dll at: {CryptoDll} (rename in Build.cs if your version differs)");
             if (!File.Exists(ZlibDll)) throw new BuildException($"Missing zlib dll at: {ZlibDll}");
