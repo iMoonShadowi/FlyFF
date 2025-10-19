@@ -1,0 +1,86 @@
+name: Dump Source Tree
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [ main ]
+    paths:
+      - "Source/**"
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # (Optional) Ensure jq is installed; it's usually present but this is safe.
+      - name: Ensure jq is available
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+
+      - name: Build Source tree listing
+        run: |
+          mkdir -p .ci
+          if [ -d "Source" ]; then
+            (cd Source && find . -type f | sort) > .ci/source_tree.txt
+          else
+            echo "Source directory not found" > .ci/source_tree.txt
+          fi
+          echo "Generated .ci/source_tree.txt"
+          echo "---- Preview (first 50 lines) ----"
+          head -n 50 .ci/source_tree.txt || true
+
+      - name: Upload artifact (source-tree)
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-tree
+          path: .ci/source_tree.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create/Upload public Gist with tree
+        id: gist
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          if [ -z "${GIST_TOKEN}" ]; then
+            echo "No GIST_TOKEN set; skipping Gist upload."
+            echo "url=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # JSON payload for Gist
+          BODY=$(jq -n \
+            --arg content "$(< .ci/source_tree.txt)" \
+            --arg dt "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            '{
+              public: true,
+              description: ("FlyFF Source/ tree @ " + $dt),
+              files: { "source_tree.txt": { content: $content } }
+            }')
+
+          RESP=$(curl -sS -X POST \
+            -H "Authorization: token ${GIST_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/gists \
+            -d "${BODY}")
+
+          HTML_URL=$(echo "$RESP" | jq -r '.html_url // empty')
+
+          if [ -z "$HTML_URL" ] || [ "$HTML_URL" = "null" ]; then
+            echo "Failed to create Gist. Response:"
+            echo "$RESP"
+            echo "url=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Gist URL: $HTML_URL"
+          echo "url=$HTML_URL" >> $GITHUB_OUTPUT
+
+      - name: Print quick links
+        run: |
+          echo "Artifact: Source tree is attached to this run (Actions > this run > Artifacts)."
+          echo "Gist URL (if created): ${{ steps.gist.outputs.url }}"
